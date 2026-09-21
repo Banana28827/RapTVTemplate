@@ -303,38 +303,21 @@ document.getElementById("save-image").addEventListener("click", async function (
       }, "image/png");
     });
 
-    const file = new File([blob], "raptv-post.png", { type: "image/png" });
+    // Use a normal browser download. The File System Access API can exist
+    // on mobile browsers but still reject a save request, which previously
+    // caused the whole exporter to fall into the generic error message.
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    link.download = "raptv-post.png";
+    link.href = objectUrl;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
-    if ("showSaveFilePicker" in window) {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: "raptv-post.png",
-        types: [{
-          description: "PNG image",
-          accept: { "image/png": [".png"] }
-        }]
-      });
-
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-    } else if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-      await navigator.share({
-        files: [file],
-        title: "RAP TV Post",
-        text: "Save your generated RAP TV post"
-      });
-    } else {
-      const link = document.createElement("a");
-      link.download = "raptv-post.png";
-      link.href = URL.createObjectURL(blob);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setTimeout(function () {
-        URL.revokeObjectURL(link.href);
-      }, 1000);
-    }
+    setTimeout(function () {
+      URL.revokeObjectURL(objectUrl);
+    }, 3000);
   } catch (error) {
     if (error && error.name !== "AbortError") {
       console.error("Could not save image:", error);
