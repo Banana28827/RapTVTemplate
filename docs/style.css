@@ -126,6 +126,28 @@ h2 {
   display: block;
 }
 
+.savebtn {
+  display: block;
+  margin-top: 30px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  background: #fd672d;
+  color: white;
+  font-family: "Steelfishy";
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.savebtn:hover {
+  background: #cf5e02;
+}
+
+.savebtn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 #maintext {
   line-height: 1.05;
   font-size: 50px;
