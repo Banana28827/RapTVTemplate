@@ -39,6 +39,9 @@ h2 {
   z-index: 10;
   background-color: transparent;
   color: #fff;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #newsimg {
