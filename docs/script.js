@@ -116,7 +116,7 @@ $("#slider").on("input",function () {
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
   const image = document.getElementById("display-image");
-  const textContainer = document.getElementById("mydiv");
+  const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
     alert("The image exporter could not be loaded. Please refresh the page and try again.");
@@ -126,119 +126,43 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.disabled = true;
   button.textContent = "Saving...";
 
-  let exportBox = null;
-
   try {
-    const imageRect = image.getBoundingClientRect();
-    const textRect = textContainer.getBoundingClientRect();
-
-    const exportWidth = Math.round(imageRect.width);
-    const exportHeight = Math.round(imageRect.height);
-
-    // Make absolutely sure the custom font is loaded before html2canvas runs.
+    /*
+     * Capture the LIVE page instead of rebuilding/cloning the text.
+     *
+     * This is important because the live page already has the correct
+     * Steelfishy font for #maintext and the slimmer Arial italic font for
+     * #bottomtext. Cloning the elements caused html2canvas to change their
+     * font/layout.
+     */
     if (document.fonts) {
       await document.fonts.load('50px "Steelfishy"');
       await document.fonts.ready;
     }
 
-    exportBox = document.createElement("div");
-    exportBox.dataset.raptvExport = "true";
-    exportBox.style.position = "fixed";
-    exportBox.style.left = "0";
-    exportBox.style.top = "0";
-    exportBox.style.width = exportWidth + "px";
-    exportBox.style.height = exportHeight + "px";
-    exportBox.style.overflow = "hidden";
-    exportBox.style.background = "#000000";
-    exportBox.style.zIndex = "-99999";
+    const imageRect = image.getBoundingClientRect();
+    const bottomHrRect = bottomHr ? bottomHr.getBoundingClientRect() : imageRect;
 
-    // Put the image/overlay into the export at exactly its displayed size.
-    const imageClone = image.cloneNode(true);
-    imageClone.style.position = "absolute";
-    imageClone.style.left = "0";
-    imageClone.style.top = "0";
-    imageClone.style.width = imageRect.width + "px";
-    imageClone.style.height = imageRect.height + "px";
-    imageClone.style.margin = "0";
-    imageClone.style.border = "1px solid black";
-    exportBox.appendChild(imageClone);
+    // Keep the post 432px wide, but extend its height until bottomhr.png ends.
+    // If the headline becomes two or three lines, bottomhr moves down and the
+    // exported image automatically grows with it.
+    const exportWidth = Math.round(imageRect.width);
+    const exportBottom = Math.max(imageRect.bottom, bottomHrRect.bottom);
+    const exportHeight = Math.ceil(exportBottom - imageRect.top);
 
-    /*
-     * Clone the ENTIRE draggable text container instead of cloning each text
-     * node individually. This preserves #ct, .container, #maintext,
-     * #bottomtext and #bottomhr exactly as the live page lays them out.
-     */
-    const textClone = textContainer.cloneNode(true);
-    textClone.style.position = "absolute";
-    textClone.style.left = Math.round(textRect.left - imageRect.left) + "px";
-    textClone.style.top = Math.round(textRect.top - imageRect.top) + "px";
-    textClone.style.margin = "0";
-    textClone.style.right = "auto";
-    textClone.style.bottom = "auto";
-    textClone.style.transform = "none";
-    textClone.style.visibility = "visible";
-    textClone.style.opacity = "1";
-
-    // Explicitly preserve the live container dimensions/appearance.
-    const textComputed = window.getComputedStyle(textContainer);
-    textClone.style.width = textComputed.width;
-    textClone.style.height = textComputed.height;
-    textClone.style.backgroundColor = textComputed.backgroundColor;
-    textClone.style.border = textComputed.border;
-    textClone.style.padding = textComputed.padding;
-    textClone.style.boxSizing = textComputed.boxSizing;
-
-    exportBox.appendChild(textClone);
-
-    /*
-     * Add a font-face inside the export tree. This prevents html2canvas from
-     * falling back to Arial when it renders the cloned Steelfishy text.
-     * The font is same-origin with this GitHub Pages site.
-     */
-    try {
-      const fontResponse = await fetch(new URL("steelfishy/steelfisheb.ttf", document.baseURI).href);
-      if (fontResponse.ok) {
-        const fontBuffer = await fontResponse.arrayBuffer();
-        const bytes = new Uint8Array(fontBuffer);
-        let binary = "";
-        const chunkSize = 0x8000;
-
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-        }
-
-        const fontStyle = document.createElement("style");
-        fontStyle.textContent =
-          '@font-face { font-family: "Steelfishy"; src: url(data:font/ttf;base64,' +
-          btoa(binary) +
-          ') format("truetype"); font-style: normal; font-weight: 100; }' +
-          '#mydiv, #mydiv * { font-family: "Steelfishy"; }' +
-          '#bottomtext { font-family: Arial !important; }';
-        exportBox.insertBefore(fontStyle, exportBox.firstChild);
-      }
-    } catch (fontError) {
-      console.warn("Could not embed Steelfishy font; using the loaded page font.", fontError);
-    }
-
-    document.body.appendChild(exportBox);
-
-    await new Promise(function (resolve) {
-      requestAnimationFrame(function () {
-        requestAnimationFrame(resolve);
-      });
-    });
-
-    const canvas = await html2canvas(exportBox, {
+    const canvas = await html2canvas(document.body, {
+      x: Math.round(imageRect.left + window.scrollX),
+      y: Math.round(imageRect.top + window.scrollY),
       width: exportWidth,
       height: exportHeight,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
-      logging: false
+      logging: false,
+      ignoreElements: function (el) {
+        return el.id === "save-image";
+      }
     });
-
-    exportBox.remove();
-    exportBox = null;
 
     const blob = await new Promise(function (resolve, reject) {
       canvas.toBlob(function (result) {
@@ -282,10 +206,6 @@ document.getElementById("save-image").addEventListener("click", async function (
       }, 1000);
     }
   } catch (error) {
-    if (exportBox) {
-      exportBox.remove();
-    }
-
     if (error && error.name !== "AbortError") {
       console.error("Could not save image:", error);
       alert("Could not save the image. Please try again.");
