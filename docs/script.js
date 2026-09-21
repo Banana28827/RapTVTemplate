@@ -115,7 +115,7 @@ $("#slider").on("input",function () {
 // Save the generated post as a PNG.
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
-  const image = document.getElementById("display-image");
+  const imageElement = document.getElementById("display-image");
   const mydiv = document.getElementById("mydiv");
 
   if (typeof html2canvas === "undefined") {
@@ -126,7 +126,7 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.disabled = true;
   button.textContent = "Saving...";
 
-  let exportStage = null;
+  let overlayStage = null;
 
   try {
     if (document.fonts) {
@@ -134,122 +134,99 @@ document.getElementById("save-image").addEventListener("click", async function (
       await document.fonts.ready;
     }
 
-    await new Promise(function (resolve) {
-      requestAnimationFrame(function () {
-        requestAnimationFrame(resolve);
-      });
+    const width = 432;
+    const height = 540;
+
+    // Read the uploaded image from the editor, but NEVER ask html2canvas to
+    // render the CSS background. Draw it directly with a native canvas.
+    const background = getComputedStyle(imageElement).backgroundImage;
+    const match = background.match(/^url\\(["']?(.*?)["']?\\)$/);
+    if (!match) throw new Error("No uploaded image is available to export.");
+
+    const uploadedImage = new Image();
+    uploadedImage.src = match[1];
+
+    await new Promise(function (resolve, reject) {
+      if (uploadedImage.complete && uploadedImage.naturalWidth > 0) {
+        resolve();
+        return;
+      }
+      uploadedImage.onload = resolve;
+      uploadedImage.onerror = function () {
+        reject(new Error("The uploaded image could not be loaded."));
+      };
     });
 
-    /*
-     * Export a post-sized composition instead of cropping document.body.
-     * The editor keeps the upload and draggable overlay in different layout
-     * containers, so their page coordinates must not be used as the PNG's
-     * coordinates.
-     *
-     * The uploaded image is always the 432x540 base of the export.
-     * The complete draggable overlay is placed over that base at the
-     * bottom-left, which is the intended RAP TV composition.
-     */
-    const exportWidth = 432;
-    const imageHeight = 540;
+    const finalCanvas = document.createElement("canvas");
+    finalCanvas.width = width * 2;
+    finalCanvas.height = height * 2;
+    const ctx = finalCanvas.getContext("2d");
+    ctx.scale(2, 2);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, width, height);
 
-    const computedBackground = getComputedStyle(image).backgroundImage;
-    const match = computedBackground.match(/^url\(["']?(.*?)["']?\)$/);
+    // Reproduce background-size: cover / background-position: center.
+    const sourceRatio = uploadedImage.naturalWidth / uploadedImage.naturalHeight;
+    const targetRatio = width / height;
+    let sx = 0, sy = 0;
+    let sw = uploadedImage.naturalWidth, sh = uploadedImage.naturalHeight;
 
-    if (!match) {
-      throw new Error("No uploaded image is available to export.");
+    if (sourceRatio > targetRatio) {
+      sw = uploadedImage.naturalHeight * targetRatio;
+      sx = (uploadedImage.naturalWidth - sw) / 2;
+    } else if (sourceRatio < targetRatio) {
+      sh = uploadedImage.naturalWidth / targetRatio;
+      sy = (uploadedImage.naturalHeight - sh) / 2;
     }
 
-    const uploadedUrl = match[1];
+    ctx.drawImage(uploadedImage, sx, sy, sw, sh, 0, 0, width, height);
 
-    exportStage = document.createElement("div");
-    exportStage.id = "raptv-export-stage";
-    exportStage.style.position = "fixed";
-    exportStage.style.left = "-100000px";
-    exportStage.style.top = "0";
-    exportStage.style.width = exportWidth + "px";
-    exportStage.style.height = imageHeight + "px";
-    exportStage.style.overflow = "hidden";
-    exportStage.style.background = "#000000";
-    exportStage.style.pointerEvents = "none";
-    exportStage.style.zIndex = "-100000";
-    document.body.appendChild(exportStage);
+    // Render only the draggable overlay with html2canvas.
+    overlayStage = document.createElement("div");
+    overlayStage.style.position = "fixed";
+    overlayStage.style.left = "0px";
+    overlayStage.style.top = "0px";
+    overlayStage.style.width = width + "px";
+    overlayStage.style.height = height + "px";
+    overlayStage.style.overflow = "hidden";
+    overlayStage.style.background = "transparent";
+    overlayStage.style.zIndex = "2147483647";
+    overlayStage.style.pointerEvents = "none";
+    document.body.appendChild(overlayStage);
 
-    const exportImage = document.createElement("img");
-    exportImage.src = uploadedUrl;
-    exportImage.alt = "";
-    exportImage.style.position = "absolute";
-    exportImage.style.left = "0";
-    exportImage.style.top = "0";
-    exportImage.style.width = exportWidth + "px";
-    exportImage.style.height = imageHeight + "px";
-    exportImage.style.objectFit = "cover";
-    exportImage.style.objectPosition = "center center";
-    exportImage.style.display = "block";
-    exportStage.appendChild(exportImage);
+    const header = document.getElementById("mydivheader");
+    const mainText = document.getElementById("maintext");
+    const bottomText = document.getElementById("bottomtext");
+    const bottomHr = document.getElementById("bottomhr");
 
-    const originalOverlay = image.querySelector("img");
-    if (originalOverlay) {
-      const overlayClone = originalOverlay.cloneNode(true);
-      const overlayStyle = getComputedStyle(originalOverlay);
+    const rects = [
+      header.getBoundingClientRect(),
+      mainText.getBoundingClientRect(),
+      bottomText.getBoundingClientRect(),
+      bottomHr.getBoundingClientRect()
+    ];
 
-      overlayClone.style.position = "absolute";
-      overlayClone.style.left = "0";
-      overlayClone.style.top = "0";
-      overlayClone.style.width = exportWidth + "px";
-      overlayClone.style.height = "auto";
-      overlayClone.style.margin = "0";
-      overlayClone.style.transform = overlayStyle.transform;
-      overlayClone.style.transformOrigin = overlayStyle.transformOrigin;
-      exportStage.appendChild(overlayClone);
-    }
+    const overlayTop = Math.min.apply(null, rects.map(function (r) { return r.top; }));
+    const overlayBottom = Math.max.apply(null, rects.map(function (r) { return r.bottom; }));
+    const overlayHeight = Math.ceil(overlayBottom - overlayTop + 8);
 
-    /*
-     * Measure the visible overlay independently. #mydiv itself has height:0
-     * in the editor, so use its children to determine the actual content
-     * footprint before positioning the clone.
-     */
-    const mydivRect = mydiv.getBoundingClientRect();
-    const headerRect = document.getElementById("mydivheader").getBoundingClientRect();
-    const mainRect = document.getElementById("maintext").getBoundingClientRect();
-    const bottomRect = document.getElementById("bottomtext").getBoundingClientRect();
-    const hrRect = document.getElementById("bottomhr").getBoundingClientRect();
+    const clone = mydiv.cloneNode(true);
+    clone.style.position = "absolute";
+    clone.style.left = "0px";
+    clone.style.top = Math.max(0, height - overlayHeight) + "px";
+    clone.style.width = width + "px";
+    clone.style.height = overlayHeight + "px";
+    clone.style.margin = "0";
+    clone.style.padding = "0";
+    clone.style.background = "transparent";
+    clone.style.border = "0";
+    clone.style.pointerEvents = "none";
 
-    const overlayTop = Math.min(headerRect.top, mainRect.top, bottomRect.top, hrRect.top);
-    const overlayBottom = Math.max(headerRect.bottom, mainRect.bottom, bottomRect.bottom, hrRect.bottom);
-    const overlayHeight = Math.max(1, Math.ceil(overlayBottom - overlayTop + 8));
-
-    const textClone = mydiv.cloneNode(true);
-    textClone.style.position = "absolute";
-    textClone.style.left = "0";
-    textClone.style.top = Math.max(0, imageHeight - overlayHeight) + "px";
-    textClone.style.width = exportWidth + "px";
-    textClone.style.height = overlayHeight + "px";
-    textClone.style.margin = "0";
-    textClone.style.padding = "0";
-    textClone.style.background = "transparent";
-    textClone.style.zIndex = "10";
-    textClone.style.pointerEvents = "none";
-
-    textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
+    clone.querySelectorAll("[contenteditable]").forEach(function (el) {
       el.removeAttribute("contenteditable");
     });
 
-    exportStage.appendChild(textClone);
-
-    const stageImages = Array.from(exportStage.querySelectorAll("img"));
-    await Promise.all(stageImages.map(function (img) {
-      if (img.complete && img.naturalWidth > 0) {
-        return Promise.resolve();
-      }
-
-      return new Promise(function (resolve, reject) {
-        img.addEventListener("load", resolve, { once: true });
-        img.addEventListener("error", function () {
-          reject(new Error("An export image could not be loaded."));
-        }, { once: true });
-      });
-    }));
+    overlayStage.appendChild(clone);
 
     await new Promise(function (resolve) {
       requestAnimationFrame(function () {
@@ -257,21 +234,23 @@ document.getElementById("save-image").addEventListener("click", async function (
       });
     });
 
-    const canvas = await html2canvas(exportStage, {
-      width: exportWidth,
-      height: imageHeight,
-      windowWidth: exportWidth,
-      windowHeight: imageHeight,
+    const overlayCanvas = await html2canvas(overlayStage, {
+      width: width,
+      height: height,
+      windowWidth: Math.max(window.innerWidth, width),
+      windowHeight: Math.max(window.innerHeight, height),
       scrollX: 0,
       scrollY: 0,
       scale: 2,
-      backgroundColor: "#000000",
+      backgroundColor: null,
       useCORS: true,
       logging: false
     });
 
+    ctx.drawImage(overlayCanvas, 0, 0);
+
     const blob = await new Promise(function (resolve, reject) {
-      canvas.toBlob(function (result) {
+      finalCanvas.toBlob(function (result) {
         if (result) resolve(result);
         else reject(new Error("Could not create the PNG file."));
       }, "image/png");
@@ -282,12 +261,8 @@ document.getElementById("save-image").addEventListener("click", async function (
     if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({
         suggestedName: "raptv-post.png",
-        types: [{
-          description: "PNG image",
-          accept: { "image/png": [".png"] }
-        }]
+        types: [{ description: "PNG image", accept: { "image/png": [".png"] } }]
       });
-
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
@@ -304,9 +279,7 @@ document.getElementById("save-image").addEventListener("click", async function (
       document.body.appendChild(link);
       link.click();
       link.remove();
-      setTimeout(function () {
-        URL.revokeObjectURL(link.href);
-      }, 1000);
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
     }
   } catch (error) {
     if (error && error.name !== "AbortError") {
@@ -314,8 +287,8 @@ document.getElementById("save-image").addEventListener("click", async function (
       alert("Could not save the image. Please try again.");
     }
   } finally {
-    if (exportStage && exportStage.parentNode) {
-      exportStage.parentNode.removeChild(exportStage);
+    if (overlayStage && overlayStage.parentNode) {
+      overlayStage.parentNode.removeChild(overlayStage);
     }
     button.disabled = false;
     button.textContent = "Save Image";
