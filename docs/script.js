@@ -110,3 +110,70 @@ $("#slider").on("input",function () {
             $('#maintext').css("font-size", $(this).val() + "px");
             console.log((this).val());
     });
+
+
+// Save the generated post as a PNG.
+document.getElementById("save-image").addEventListener("click", async function () {
+  const button = this;
+  const image = document.getElementById("display-image");
+  const textBox = document.getElementById("mydiv");
+
+  if (typeof html2canvas === "undefined") {
+    alert("The image exporter could not be loaded. Please refresh the page and try again.");
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Saving...";
+
+  try {
+    // Capture the image and the draggable text box together, wherever the user
+    // has positioned the text box on the page.
+    const elements = [image, textBox];
+    const rects = elements.map(function (el) {
+      const r = el.getBoundingClientRect();
+      return {
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom
+      };
+    });
+
+    const left = Math.min.apply(null, rects.map(r => r.left));
+    const top = Math.min.apply(null, rects.map(r => r.top));
+    const right = Math.max.apply(null, rects.map(r => r.right));
+    const bottom = Math.max.apply(null, rects.map(r => r.bottom));
+
+    const padding = 4;
+    const x = Math.max(0, left - padding);
+    const y = Math.max(0, top - padding);
+    const width = Math.min(window.innerWidth - x, right - left + padding * 2);
+    const height = Math.min(window.innerHeight - y, bottom - top + padding * 2);
+
+    const canvas = await html2canvas(document.body, {
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      scale: 2,
+      backgroundColor: "#000000",
+      useCORS: true,
+      logging: false,
+      ignoreElements: function (el) {
+        return el.id === "save-image";
+      }
+    });
+
+    const link = document.createElement("a");
+    link.download = "raptv-post.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  } catch (error) {
+    console.error("Could not save image:", error);
+    alert("Could not save the image. Please try again.");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Save Image";
+  }
+});
