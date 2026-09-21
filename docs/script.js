@@ -9,42 +9,47 @@ dragElement(document.getElementById("mydiv"));
 
 function dragElement(elmnt) {
   var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-  if (document.getElementById(elmnt.id + "header")) {
-    /* if present, the header is where you move the DIV from:*/
-    document.getElementById(elmnt.id + "header").onmousedown = dragMouseDown;
-  } else {
-    /* otherwise, move the DIV from anywhere inside the DIV:*/
-    elmnt.onmousedown = dragMouseDown;
-  }
+  var dragHandle = document.getElementById(elmnt.id + "header") || elmnt;
 
-  function dragMouseDown(e) {
-    e = e || window.event;
+  // Pointer events work with both mouse and touch, so dragging works on PC and mobile.
+  dragHandle.addEventListener("pointerdown", dragPointerDown);
+
+  function dragPointerDown(e) {
     e.preventDefault();
-    // get the mouse cursor position at startup:
+
     pos3 = e.clientX;
     pos4 = e.clientY;
-    document.onmouseup = closeDragElement;
-    // call a function whenever the cursor moves:
-    document.onmousemove = elementDrag;
+
+    // Keep receiving pointer events even if the finger/mouse leaves the header.
+    if (dragHandle.setPointerCapture) {
+      dragHandle.setPointerCapture(e.pointerId);
+    }
+
+    dragHandle.addEventListener("pointermove", elementDrag);
+    dragHandle.addEventListener("pointerup", closeDragElement);
+    dragHandle.addEventListener("pointercancel", closeDragElement);
   }
 
   function elementDrag(e) {
-    e = e || window.event;
     e.preventDefault();
-    // calculate the new cursor position:
+
     pos1 = pos3 - e.clientX;
     pos2 = pos4 - e.clientY;
     pos3 = e.clientX;
     pos4 = e.clientY;
-    // set the element's new position:
+
     elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
     elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
   }
 
-  function closeDragElement() {
-    /* stop moving when mouse button is released:*/
-    document.onmouseup = null;
-    document.onmousemove = null;
+  function closeDragElement(e) {
+    dragHandle.removeEventListener("pointermove", elementDrag);
+    dragHandle.removeEventListener("pointerup", closeDragElement);
+    dragHandle.removeEventListener("pointercancel", closeDragElement);
+
+    if (dragHandle.releasePointerCapture && e && dragHandle.hasPointerCapture(e.pointerId)) {
+      dragHandle.releasePointerCapture(e.pointerId);
+    }
   }
 }
 
