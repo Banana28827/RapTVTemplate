@@ -278,10 +278,15 @@ document.getElementById("save-image").addEventListener("click", async function (
         logging: false
       });
 
+      // The main canvas context is already scaled 2x. Keep the
+      // destination coordinates/sizes in CSS pixels so the text lands
+      // exactly where it appears in the editor.
       ctx.drawImage(
         elementCanvas,
-        Math.round((rect.left - imageLeft) * 2),
-        Math.round((rect.top - imageTop) * 2)
+        Math.round(rect.left - imageLeft),
+        Math.round(rect.top - imageTop),
+        Math.round(rect.width),
+        Math.round(rect.height)
       );
     }
 
