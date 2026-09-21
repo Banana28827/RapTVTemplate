@@ -94,8 +94,8 @@ h2 {
 }
 
 .orangebtn {
-  -webkit-border-radius: 10;
-  -moz-border-radius: 10;
+  -webkit-border-radius: 10px;
+  -moz-border-radius: 10px;
   border-radius: 10px;
   background: #fd672d;
   padding: 10px 20px 10px 20px;
@@ -109,8 +109,8 @@ h2 {
 }
 
 .whitebtn {
-  -webkit-border-radius: 10;
-  -moz-border-radius: 10;
+  -webkit-border-radius: 10px;
+  -moz-border-radius: 10px;
   border-radius: 10px;
   background: #ffffff;
   padding: 10px 20px 10px 20px;
@@ -154,11 +154,12 @@ h2 {
   text-transform: uppercase
 }
 
+/* Match the original slimmer secondary-text styling. */
 #bottomtext {
-  font-family: Arial;
-  font-style: italic;
-  font-weight: 50;
-  font-size=15px;
+  font-family: Arial, sans-serif !important;
+  font-style: italic !important;
+  font-weight: 400 !important;
+  font-size: 15px !important;
 }
 
 #display-image {
