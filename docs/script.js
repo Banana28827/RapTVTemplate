@@ -140,19 +140,40 @@ document.getElementById("save-image").addEventListener("click", async function (
       });
     });
 
+    /*
+     * In the editor, the image lives inside the Bootstrap column while the
+     * draggable text overlay lives in #mydiv. That means their screen X
+     * positions are different. For the exported post, the image must sit
+     * directly underneath the entire text overlay.
+     *
+     * Temporarily translate the image horizontally so its left edge matches
+     * #mydiv's left edge. This changes only the export composition and is
+     * restored immediately afterward.
+     */
+    const mydivRect = mydiv.getBoundingClientRect();
+    const originalImageTransform = image.style.transform;
+    const imageRectBefore = image.getBoundingClientRect();
+
+    image.style.transform =
+      "translateX(" + Math.round(mydivRect.left - imageRectBefore.left) + "px)";
+
+    await new Promise(function (resolve) {
+      requestAnimationFrame(resolve);
+    });
+
     const imageRect = image.getBoundingClientRect();
     const bottomHrRect = bottomHr.getBoundingClientRect();
     const mainTextRect = document.getElementById("maintext").getBoundingClientRect();
     const bottomTextRect = document.getElementById("bottomtext").getBoundingClientRect();
 
+    // The image and the draggable text now share the same left edge.
     const exportLeft = imageRect.left;
     const exportTop = imageRect.top;
 
     /*
      * Keep the source image at its original 432x540 size. The exported canvas
-     * should grow DOWNWARD when the headline wraps or the bottom divider/text
-     * extends below the image. We only change the canvas crop; we never change
-     * #display-image, #ct, or #mydiv dimensions.
+     * grows DOWNWARD when the headline wraps or the bottom divider/text extends
+     * below the image.
      */
     const exportBottom = Math.max(
       imageRect.bottom,
@@ -239,6 +260,10 @@ document.getElementById("save-image").addEventListener("click", async function (
       alert("Could not save the image. Please try again.");
     }
   } finally {
+    if (typeof originalImageTransform !== "undefined") {
+      image.style.transform = originalImageTransform;
+    }
+
     button.disabled = false;
     button.textContent = "Save Image";
   }
