@@ -107,9 +107,9 @@ image_input.addEventListener("change", function() {
 
 
 $("#slider").on("input",function () {
-            $('#maintext').css("font-size", $(this).val() + "px");
-            console.log((this).val());
-    });
+  $('#maintext').css("font-size", $(this).val() + "px");
+  console.log((this).val());
+});
 
 
 // Save the generated post as a PNG.
@@ -165,13 +165,57 @@ document.getElementById("save-image").addEventListener("click", async function (
       }
     });
 
-    const link = document.createElement("a");
-    link.download = "raptv-post.png";
-    link.href = canvas.toDataURL("image/png");
-    link.click();
+    const blob = await new Promise(function (resolve, reject) {
+      canvas.toBlob(function (result) {
+        if (result) {
+          resolve(result);
+        } else {
+          reject(new Error("Could not create the PNG file."));
+        }
+      }, "image/png");
+
+    });
+
+    const file = new File([blob], "raptv-post.png", { type: "image/png" });
+
+    // Use the browser's native save dialog when supported.
+    if ("showSaveFilePicker" in window) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "raptv-post.png",
+        types: [{
+          description: "PNG image",
+          accept: { "image/png": [".png"] }
+        }]
+      });
+
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    // On mobile browsers that support Web Share, open the native share/save sheet.
+    } else if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      await navigator.share({
+        files: [file],
+        title: "RAP TV Post",
+        text: "Save your generated RAP TV post"
+      });
+    } else {
+      // Final fallback for browsers without a native save dialog/share sheet.
+      const link = document.createElement("a");
+      link.download = "raptv-post.png";
+      link.href = URL.createObjectURL(blob);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () {
+        URL.revokeObjectURL(link.href);
+      }, 1000);
+    }
   } catch (error) {
-    console.error("Could not save image:", error);
-    alert("Could not save the image. Please try again.");
+    // Canceling the native save/share dialog is not an error.
+    if (error && error.name !== "AbortError") {
+      console.error("Could not save image:", error);
+      alert("Could not save the image. Please try again.");
+    }
   } finally {
     button.disabled = false;
     button.textContent = "Save Image";
