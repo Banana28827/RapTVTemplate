@@ -117,6 +117,7 @@ document.getElementById("save-image").addEventListener("click", async function (
   const button = this;
   const image = document.getElementById("display-image");
   const textContainer = document.getElementById("ct");
+  const mydiv = document.getElementById("mydiv");
   const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
@@ -127,57 +128,59 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.disabled = true;
   button.textContent = "Saving...";
 
+  const oldCtHeight = textContainer.style.height;
+  const oldMydivHeight = mydiv.style.height;
+
   try {
-    // Make sure the live page is fully laid out before measuring it.
     if (document.fonts) {
       await document.fonts.load('50px "Steelfishy"');
       await document.fonts.ready;
     }
 
+    /*
+     * The editor uses a fixed-height #ct and a zero-height #mydiv, while the
+     * headline/bottomhr are allowed to overflow them. Temporarily remove those
+     * artificial height limits while exporting. This does NOT change the
+     * positions of the text; it just makes the full overflowing content part
+     * of the layout that html2canvas sees.
+     */
+    textContainer.style.height = "auto";
+    mydiv.style.height = "auto";
+
     await new Promise(function (resolve) {
-      requestAnimationFrame(resolve);
+      requestAnimationFrame(function () {
+        requestAnimationFrame(resolve);
+      });
     });
 
     const imageRect = image.getBoundingClientRect();
-    const textRect = textContainer.getBoundingClientRect();
     const bottomHrRect = bottomHr.getBoundingClientRect();
+    const mainTextRect = document.getElementById("maintext").getBoundingClientRect();
+    const bottomTextRect = document.getElementById("bottomtext").getBoundingClientRect();
 
-    const exportWidth = Math.round(imageRect.width);
+    const exportLeft = imageRect.left;
+    const exportTop = imageRect.top;
 
-    /*
-     * #ct has a fixed CSS height of 150px, but its contents are allowed to
-     * overflow. scrollHeight includes that overflow, so it tells us how far
-     * the actual content extends when the headline becomes multiple lines.
-     *
-     * Use both scrollHeight and bottomhr's real position. This prevents the
-     * export from falling back to the image's fixed 540px height.
-     */
-    const contentBottomFromCt = textRect.top + textContainer.scrollHeight;
+    // Follow the actual bottomhr.png, plus the text if it extends farther.
     const exportBottom = Math.max(
       imageRect.bottom,
       bottomHrRect.bottom,
-      contentBottomFromCt
+      mainTextRect.bottom,
+      bottomTextRect.bottom
     );
 
-    // A tiny amount of breathing room prevents the bottomhr pixels touching
-    // the final edge of the PNG.
-    const bottomPadding = 2;
-    const exportHeight = Math.ceil(exportBottom - imageRect.top + bottomPadding);
+    const exportWidth = Math.round(imageRect.width);
+    const exportHeight = Math.ceil(exportBottom - exportTop + 4);
 
     const canvas = await html2canvas(document.body, {
-      x: Math.round(imageRect.left + window.scrollX),
-      y: Math.round(imageRect.top + window.scrollY),
+      x: Math.round(exportLeft + window.scrollX),
+      y: Math.round(exportTop + window.scrollY),
       width: exportWidth,
       height: exportHeight,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
       logging: false,
-      windowWidth: document.documentElement.scrollWidth,
-      windowHeight: Math.max(
-        document.documentElement.scrollHeight,
-        Math.ceil(exportBottom + window.scrollY + bottomPadding)
-      ),
       ignoreElements: function (el) {
         return el.id === "save-image";
       }
@@ -230,6 +233,10 @@ document.getElementById("save-image").addEventListener("click", async function (
       alert("Could not save the image. Please try again.");
     }
   } finally {
+    // Restore the editor's original layout after the export.
+    textContainer.style.height = oldCtHeight;
+    mydiv.style.height = oldMydivHeight;
+
     button.disabled = false;
     button.textContent = "Save Image";
   }
