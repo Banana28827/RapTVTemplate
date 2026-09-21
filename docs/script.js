@@ -126,49 +126,15 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.textContent = "Saving...";
 
   try {
+    // Export exactly the 432x540 post area. The text is positioned inside
+    // this area according to its real position on the page.
     const imageRect = image.getBoundingClientRect();
+    const exportWidth = Math.round(imageRect.width);
+    const exportHeight = Math.round(imageRect.height);
 
-    const textElements = [
-      document.getElementById("mydivheader"),
-      document.getElementById("maintext"),
-      document.getElementById("bottomtext"),
-      document.getElementById("bottomhr")
-    ].filter(Boolean);
-
-    // Make sure the custom Steelfishy font has finished loading before
-    // html2canvas clones the text.
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
     }
-
-    // The post normally starts at the selected image. Extend the export only
-    // when a draggable element (especially bottomhr) reaches below it.
-    const rects = textElements.map(function (el) {
-      const r = el.getBoundingClientRect();
-      return {
-        left: r.left,
-        top: r.top,
-        right: r.right,
-        bottom: r.bottom
-      };
-    });
-
-    const exportLeft = Math.min(
-      imageRect.left,
-      ...rects.map(r => r.left)
-    );
-    const exportTop = imageRect.top;
-    const exportRight = Math.max(
-      imageRect.right,
-      ...rects.map(r => r.right)
-    );
-    const exportBottom = Math.max(
-      imageRect.bottom,
-      ...rects.map(r => r.bottom)
-    );
-
-    const exportWidth = Math.ceil(exportRight - exportLeft);
-    const exportHeight = Math.ceil(exportBottom - exportTop);
 
     const exportBox = document.createElement("div");
     exportBox.dataset.raptvExport = "true";
@@ -181,31 +147,42 @@ document.getElementById("save-image").addEventListener("click", async function (
     exportBox.style.backgroundColor = "#000000";
     exportBox.style.zIndex = "-99999";
 
-    // Copy the selected image and overlay.
+    // Copy the complete image/overlay exactly as displayed.
     const imageClone = image.cloneNode(true);
     imageClone.style.position = "absolute";
-    imageClone.style.left = Math.round(imageRect.left - exportLeft) + "px";
+    imageClone.style.left = "0";
     imageClone.style.top = "0";
     imageClone.style.margin = "0";
-    imageClone.style.width = Math.round(imageRect.width) + "px";
-    imageClone.style.height = Math.round(imageRect.height) + "px";
+    imageClone.style.width = exportWidth + "px";
+    imageClone.style.height = exportHeight + "px";
     imageClone.style.border = "1px solid black";
     exportBox.appendChild(imageClone);
 
+    const textElements = [
+      document.getElementById("mydivheader"),
+      document.getElementById("maintext"),
+      document.getElementById("bottomtext"),
+      document.getElementById("bottomhr")
+    ].filter(Boolean);
+
     textElements.forEach(function (source) {
       const rect = source.getBoundingClientRect();
-      const clone = source.cloneNode(true);
       const computed = window.getComputedStyle(source);
+      const clone = source.cloneNode(true);
 
       clone.style.position = "absolute";
-      clone.style.left = Math.round(rect.left - exportLeft) + "px";
-      clone.style.top = Math.round(rect.top - exportTop) + "px";
+      clone.style.boxSizing = "border-box";
+      clone.style.left = Math.round(rect.left - imageRect.left) + "px";
+      clone.style.top = Math.round(rect.top - imageRect.top) + "px";
+      clone.style.width = Math.round(rect.width) + "px";
+      clone.style.height = Math.round(rect.height) + "px";
       clone.style.margin = "0";
+      clone.style.padding = computed.padding;
+      clone.style.display = computed.display;
       clone.style.visibility = "visible";
       clone.style.opacity = "1";
 
-      // html2canvas can otherwise fall back to a default font for cloned
-      // content. Copy the resolved font properties explicitly.
+      // Preserve the exact font used by the live element.
       clone.style.fontFamily = computed.fontFamily;
       clone.style.fontSize = computed.fontSize;
       clone.style.fontStyle = computed.fontStyle;
@@ -213,18 +190,28 @@ document.getElementById("save-image").addEventListener("click", async function (
       clone.style.lineHeight = computed.lineHeight;
       clone.style.letterSpacing = computed.letterSpacing;
       clone.style.textTransform = computed.textTransform;
+      clone.style.textAlign = computed.textAlign;
+      clone.style.wordBreak = computed.wordBreak;
+      clone.style.whiteSpace = computed.whiteSpace;
       clone.style.color = computed.color;
 
-      // Preserve the NEWS image's intrinsic dimensions and bottomhr width.
+      if (source.id === "mydivheader") {
+        clone.style.padding = computed.padding;
+      }
+
       if (source.id === "bottomhr") {
-        clone.style.width = computed.width;
-        clone.style.height = computed.height;
+        clone.style.objectFit = "fill";
       }
 
       exportBox.appendChild(clone);
     });
 
     document.body.appendChild(exportBox);
+
+    // Force the cloned text to use the same loaded font before rendering.
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
 
     await new Promise(function (resolve) {
       requestAnimationFrame(function () {
