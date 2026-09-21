@@ -126,74 +126,87 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.textContent = "Saving...";
 
   try {
-    // The draggable text container itself has height: 0, so use its visible
-    // children when calculating the actual area that needs to be exported.
-    const elements = [
-      image,
+    /*
+     * Build a temporary 432x540 export canvas that mirrors exactly what the
+     * user sees: the selected image + overlay, with the draggable text
+     * elements placed at their current screen position relative to the image.
+     *
+     * This is more reliable than cropping document.body because #mydiv has
+     * height: 0 and is positioned outside #display-image in the DOM.
+     */
+    const imageRect = image.getBoundingClientRect();
+    const exportWidth = Math.round(imageRect.width);
+    const exportHeight = Math.round(imageRect.height);
+
+    const exportBox = document.createElement("div");
+    exportBox.style.position = "fixed";
+    exportBox.style.left = "0";
+    exportBox.style.top = "0";
+    exportBox.style.width = exportWidth + "px";
+    exportBox.style.height = exportHeight + "px";
+    exportBox.style.overflow = "hidden";
+    exportBox.style.backgroundColor = "#000000";
+    exportBox.dataset.raptvExport = "true";
+    exportBox.style.zIndex = "-99999";
+
+    // Copy the actual image/overlay element.
+    const imageClone = image.cloneNode(true);
+    imageClone.style.position = "absolute";
+    imageClone.style.left = "0";
+    imageClone.style.top = "0";
+    imageClone.style.margin = "0";
+    imageClone.style.width = exportWidth + "px";
+    imageClone.style.height = exportHeight + "px";
+    imageClone.style.border = "1px solid black";
+    exportBox.appendChild(imageClone);
+
+    // Copy each visible draggable element using its current screen position.
+    const textElements = [
       document.getElementById("mydivheader"),
       document.getElementById("maintext"),
       document.getElementById("bottomtext"),
       document.getElementById("bottomhr")
     ].filter(Boolean);
 
-    const rects = elements.map(function (el) {
-      const r = el.getBoundingClientRect();
-      return {
-        left: r.left + window.scrollX,
-        top: r.top + window.scrollY,
-        right: r.right + window.scrollX,
-        bottom: r.bottom + window.scrollY
-      };
+    textElements.forEach(function (source) {
+      const rect = source.getBoundingClientRect();
+      const clone = source.cloneNode(true);
+
+      clone.style.position = "absolute";
+      clone.style.left = Math.round(rect.left - imageRect.left) + "px";
+      clone.style.top = Math.round(rect.top - imageRect.top) + "px";
+      clone.style.margin = "0";
+
+      // Keep the elements visible even though the temporary container is
+      // outside the normal document flow.
+      clone.style.visibility = "visible";
+      clone.style.opacity = "1";
+
+      exportBox.appendChild(clone);
     });
 
-    const padding = 6;
-    const left = Math.max(0, Math.floor(Math.min.apply(null, rects.map(r => r.left)) - padding));
-    const top = Math.max(0, Math.floor(Math.min.apply(null, rects.map(r => r.top)) - padding));
-    const right = Math.ceil(Math.max.apply(null, rects.map(r => r.right)) + padding);
-    const bottom = Math.ceil(Math.max.apply(null, rects.map(r => r.bottom)) + padding);
+    document.body.appendChild(exportBox);
 
-    const pageWidth = Math.max(document.documentElement.scrollWidth, window.innerWidth);
-    const pageHeight = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+    // Give the browser a frame to resolve fonts/images before rendering.
+    await new Promise(function (resolve) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(resolve);
+      });
+    });
 
-    // Render the whole document first. This avoids html2canvas interpreting
-    // x/y relative to the wrong viewport when the page is scrolled.
-    const fullCanvas = await html2canvas(document.body, {
-      x: 0,
-      y: 0,
-      width: pageWidth,
-      height: pageHeight,
+    const canvas = await html2canvas(exportBox, {
+      width: exportWidth,
+      height: exportHeight,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
-      logging: false,
-      windowWidth: pageWidth,
-      windowHeight: pageHeight,
-      scrollX: 0,
-      scrollY: 0,
-      ignoreElements: function (el) {
-        return el.id === "save-image";
-      }
+      logging: false
     });
 
-    const scale = fullCanvas.width / pageWidth;
-    const cropX = Math.max(0, Math.round(left * scale));
-    const cropY = Math.max(0, Math.round(top * scale));
-    const cropWidth = Math.min(fullCanvas.width - cropX, Math.round((right - left) * scale));
-    const cropHeight = Math.min(fullCanvas.height - cropY, Math.round((bottom - top) * scale));
-
-    const outputCanvas = document.createElement("canvas");
-    outputCanvas.width = cropWidth;
-    outputCanvas.height = cropHeight;
-
-    const ctx = outputCanvas.getContext("2d");
-    ctx.drawImage(
-      fullCanvas,
-      cropX, cropY, cropWidth, cropHeight,
-      0, 0, cropWidth, cropHeight
-    );
+    exportBox.remove();
 
     const blob = await new Promise(function (resolve, reject) {
-      outputCanvas.toBlob(function (result) {
+      canvas.toBlob(function (result) {
         if (result) {
           resolve(result);
         } else {
@@ -237,7 +250,12 @@ document.getElementById("save-image").addEventListener("click", async function (
       }, 1000);
     }
   } catch (error) {
-    // Canceling the native save/share dialog is not an error.
+    // Remove the temporary export element if rendering failed.
+    const leftover = document.querySelector("body > div[data-raptv-export]");
+    if (leftover) {
+      leftover.remove();
+    }
+
     if (error && error.name !== "AbortError") {
       console.error("Could not save image:", error);
       alert("Could not save the image. Please try again.");
