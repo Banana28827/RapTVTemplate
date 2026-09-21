@@ -116,9 +116,7 @@ $("#slider").on("input",function () {
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
   const image = document.getElementById("display-image");
-  const textContainer = document.getElementById("ct");
   const mydiv = document.getElementById("mydiv");
-  const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
     alert("The image exporter could not be loaded. Please refresh the page and try again.");
@@ -127,6 +125,8 @@ document.getElementById("save-image").addEventListener("click", async function (
 
   button.disabled = true;
   button.textContent = "Saving...";
+
+  let stage = null;
 
   try {
     if (document.fonts) {
@@ -141,76 +141,105 @@ document.getElementById("save-image").addEventListener("click", async function (
     });
 
     /*
-     * In the editor, the image lives inside the Bootstrap column while the
-     * draggable text overlay lives in #mydiv. That means their screen X
-     * positions are different. For the exported post, the image must sit
-     * directly underneath the entire text overlay.
+     * Export exactly what the editor shows:
      *
-     * Temporarily translate the image horizontally so its left edge matches
-     * #mydiv's left edge. This changes only the export composition and is
-     * restored immediately afterward.
+     * - The export frame is the actual 432x540 #display-image.
+     * - A clone of #display-image keeps its background image and the
+     *   dark bottom fade (#overlay-img) together.
+     * - A clone of #mydiv is placed using its CURRENT screen coordinates
+     *   relative to the image.
+     *
+     * Nothing in the live editor is moved, so the user can still drag the
+     * entire text box normally.
      */
+    const imageRect = image.getBoundingClientRect();
     const mydivRect = mydiv.getBoundingClientRect();
-    const originalImageTransform = image.style.transform;
-    const imageRectBefore = image.getBoundingClientRect();
 
-    image.style.transform =
-      "translateX(" + Math.round(mydivRect.left - imageRectBefore.left) + "px)";
+    const width = Math.round(imageRect.width);
+    const height = Math.round(imageRect.height);
 
-    await new Promise(function (resolve) {
-      requestAnimationFrame(resolve);
+    if (!width || !height) {
+      throw new Error("The image area is not available.");
+    }
+
+    stage = document.createElement("div");
+    stage.style.position = "fixed";
+    stage.style.left = "0px";
+    stage.style.top = "0px";
+    stage.style.width = width + "px";
+    stage.style.height = height + "px";
+    stage.style.overflow = "hidden";
+    stage.style.background = "#000";
+    stage.style.margin = "0";
+    stage.style.padding = "0";
+    stage.style.border = "0";
+    stage.style.pointerEvents = "none";
+    stage.style.zIndex = "2147483647";
+
+    document.body.appendChild(stage);
+
+    // Clone the complete image container. This preserves its CSS background,
+    // background-size/position, and the dark fade overlay inside it.
+    const imageClone = image.cloneNode(true);
+    imageClone.removeAttribute("id");
+    imageClone.style.position = "absolute";
+    imageClone.style.left = "0px";
+    imageClone.style.top = "0px";
+    imageClone.style.width = width + "px";
+    imageClone.style.height = height + "px";
+    imageClone.style.margin = "0";
+    imageClone.style.border = "0";
+    imageClone.style.transform = "none";
+    imageClone.style.boxSizing = "border-box";
+    imageClone.style.backgroundSize = getComputedStyle(image).backgroundSize;
+    imageClone.style.backgroundPosition = getComputedStyle(image).backgroundPosition;
+    imageClone.style.backgroundRepeat = getComputedStyle(image).backgroundRepeat;
+    imageClone.style.overflow = "hidden";
+
+    stage.appendChild(imageClone);
+
+    /*
+     * Clone the WHOLE draggable box rather than rebuilding its children.
+     * That preserves the exact relationship between NEWS, headline,
+     * subheadline, and divider that the user sees on screen.
+     */
+    const textClone = mydiv.cloneNode(true);
+    textClone.removeAttribute("id");
+    textClone.style.position = "absolute";
+    textClone.style.left = Math.round(mydivRect.left - imageRect.left) + "px";
+    textClone.style.top = Math.round(mydivRect.top - imageRect.top) + "px";
+    textClone.style.width = getComputedStyle(mydiv).width;
+    textClone.style.height = getComputedStyle(mydiv).height;
+    textClone.style.margin = "0";
+    textClone.style.padding = getComputedStyle(mydiv).padding;
+    textClone.style.border = "0";
+    textClone.style.background = "transparent";
+    textClone.style.zIndex = "20";
+    textClone.style.pointerEvents = "none";
+
+    textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
+      el.removeAttribute("contenteditable");
     });
 
-    const imageRect = image.getBoundingClientRect();
-    const bottomHrRect = bottomHr.getBoundingClientRect();
-    const mainTextRect = document.getElementById("maintext").getBoundingClientRect();
-    const bottomTextRect = document.getElementById("bottomtext").getBoundingClientRect();
+    stage.appendChild(textClone);
 
-    // The image and the draggable text now share the same left edge.
-    const exportLeft = imageRect.left;
-    const exportTop = imageRect.top;
+    await new Promise(function (resolve) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(resolve);
+      });
+    });
 
-    /*
-     * Keep the source image at its original 432x540 size. The exported canvas
-     * grows DOWNWARD when the headline wraps or the bottom divider/text extends
-     * below the image.
-     */
-    const exportBottom = Math.max(
-      imageRect.bottom,
-      bottomHrRect.bottom,
-      mainTextRect.bottom,
-      bottomTextRect.bottom
-    );
-
-    const exportWidth = Math.ceil(imageRect.width);
-    const exportHeight = Math.ceil(exportBottom - exportTop + 8);
-
-    /*
-     * The text can extend below the browser viewport because #mydiv is
-     * absolutely positioned. Give html2canvas a virtual viewport tall enough
-     * to render that overflow instead of clipping the export at the viewport.
-     */
-    const requiredWindowHeight = Math.max(
-      window.innerHeight,
-      Math.ceil(exportBottom + window.scrollY + 100)
-    );
-
-    const canvas = await html2canvas(document.body, {
-      x: Math.round(exportLeft + window.scrollX),
-      y: Math.round(exportTop + window.scrollY),
-      width: exportWidth,
-      height: exportHeight,
-      windowWidth: Math.max(window.innerWidth, Math.ceil(exportLeft + exportWidth + window.scrollX + 20)),
-      windowHeight: requiredWindowHeight,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
+    const canvas = await html2canvas(stage, {
+      width: width,
+      height: height,
+      windowWidth: width,
+      windowHeight: height,
+      scrollX: 0,
+      scrollY: 0,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
-      logging: false,
-      ignoreElements: function (el) {
-        return el.id === "save-image";
-      }
+      logging: false
     });
 
     const blob = await new Promise(function (resolve, reject) {
@@ -223,45 +252,27 @@ document.getElementById("save-image").addEventListener("click", async function (
       }, "image/png");
     });
 
-    const file = new File([blob], "raptv-post.png", { type: "image/png" });
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
 
-    if ("showSaveFilePicker" in window) {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: "raptv-post.png",
-        types: [{
-          description: "PNG image",
-          accept: { "image/png": [".png"] }
-        }]
-      });
+    link.download = "raptv-post.png";
+    link.href = objectUrl;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-    } else if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-      await navigator.share({
-        files: [file],
-        title: "RAP TV Post",
-        text: "Save your generated RAP TV post"
-      });
-    } else {
-      const link = document.createElement("a");
-      link.download = "raptv-post.png";
-      link.href = URL.createObjectURL(blob);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(function () {
-        URL.revokeObjectURL(link.href);
-      }, 1000);
-    }
+    setTimeout(function () {
+      URL.revokeObjectURL(objectUrl);
+    }, 3000);
   } catch (error) {
     if (error && error.name !== "AbortError") {
       console.error("Could not save image:", error);
       alert("Could not save the image. Please try again.");
     }
   } finally {
-    if (typeof originalImageTransform !== "undefined") {
-      image.style.transform = originalImageTransform;
+    if (stage && stage.parentNode) {
+      stage.parentNode.removeChild(stage);
     }
 
     button.disabled = false;
