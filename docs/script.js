@@ -116,9 +116,7 @@ $("#slider").on("input",function () {
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
   const image = document.getElementById("display-image");
-  const textContainer = document.getElementById("ct");
   const mydiv = document.getElementById("mydiv");
-  const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
     alert("The image exporter could not be loaded. Please refresh the page and try again.");
@@ -127,6 +125,8 @@ document.getElementById("save-image").addEventListener("click", async function (
 
   button.disabled = true;
   button.textContent = "Saving...";
+
+  let exportStage = null;
 
   try {
     if (document.fonts) {
@@ -141,76 +141,150 @@ document.getElementById("save-image").addEventListener("click", async function (
     });
 
     /*
-     * In the editor, the image lives inside the Bootstrap column while the
-     * draggable text overlay lives in #mydiv. That means their screen X
-     * positions are different. For the exported post, the image must sit
-     * directly underneath the entire text overlay.
+     * Do not capture document.body here. #display-image is a CSS background,
+     * while the draggable text is a separate absolutely-positioned element.
+     * html2canvas can render that combination with the background displaced
+     * when the body is cropped.
      *
-     * Temporarily translate the image horizontally so its left edge matches
-     * #mydiv's left edge. This changes only the export composition and is
-     * restored immediately afterward.
+     * Instead, build a small, self-contained export stage:
+     *   - a real <img> for the uploaded background
+     *   - the existing text/NEWS/divider overlay cloned at its exact screen
+     *     position relative to the image
+     *   - the existing overlay.png cloned over the image
+     *
+     * This makes the exported coordinates independent of Bootstrap columns,
+     * the page viewport, scrolling, and html2canvas body cropping.
      */
+    const imageRect = image.getBoundingClientRect();
     const mydivRect = mydiv.getBoundingClientRect();
-    const originalImageTransform = image.style.transform;
-    const imageRectBefore = image.getBoundingClientRect();
+    const bottomHr = document.getElementById("bottomhr");
+    const mainText = document.getElementById("maintext");
+    const bottomText = document.getElementById("bottomtext");
 
-    image.style.transform =
-      "translateX(" + Math.round(mydivRect.left - imageRectBefore.left) + "px)";
+    const rects = [
+      mydivRect,
+      bottomHr.getBoundingClientRect(),
+      mainText.getBoundingClientRect(),
+      bottomText.getBoundingClientRect()
+    ];
 
-    await new Promise(function (resolve) {
-      requestAnimationFrame(resolve);
+    const relativeBottom = Math.max.apply(null, rects.map(function (rect) {
+      return rect.bottom - imageRect.top;
+    }));
+
+    const exportWidth = Math.max(1, Math.ceil(imageRect.width));
+    const exportHeight = Math.max(
+      Math.ceil(imageRect.height),
+      Math.ceil(relativeBottom + 8)
+    );
+
+    exportStage = document.createElement("div");
+    exportStage.id = "raptv-export-stage";
+    exportStage.style.position = "absolute";
+    exportStage.style.left = "0px";
+    exportStage.style.top = "0px";
+    exportStage.style.width = exportWidth + "px";
+    exportStage.style.height = exportHeight + "px";
+    exportStage.style.overflow = "hidden";
+    exportStage.style.background = "#000";
+    exportStage.style.pointerEvents = "none";
+    exportStage.style.zIndex = "-100000";
+    document.body.appendChild(exportStage);
+
+    // Recreate the uploaded CSS background as a real image so it cannot be
+    // lost or shifted when html2canvas renders the export.
+    const backgroundImage = document.createElement("img");
+    const backgroundUrl = getComputedStyle(image).backgroundImage;
+
+    if (!backgroundUrl || backgroundUrl === "none") {
+      throw new Error("No uploaded image is available to export.");
+    }
+
+    const urlMatch = backgroundUrl.match(/^url\(["']?(.*?)["']?\)$/);
+    if (!urlMatch) {
+      throw new Error("Could not read the uploaded image.");
+    }
+
+    backgroundImage.src = urlMatch[1];
+    backgroundImage.style.position = "absolute";
+    backgroundImage.style.left = "0px";
+    backgroundImage.style.top = "0px";
+    backgroundImage.style.width = exportWidth + "px";
+    backgroundImage.style.height = Math.ceil(imageRect.height) + "px";
+    backgroundImage.style.objectFit = "cover";
+    backgroundImage.style.objectPosition = "center center";
+    backgroundImage.style.display = "block";
+    exportStage.appendChild(backgroundImage);
+
+    // Clone the existing overlay graphic from inside #display-image.
+    const originalOverlay = image.querySelector("img");
+    if (originalOverlay) {
+      const overlayClone = originalOverlay.cloneNode(true);
+      const overlayRect = originalOverlay.getBoundingClientRect();
+      const overlayStyle = getComputedStyle(originalOverlay);
+
+      overlayClone.style.position = "absolute";
+      overlayClone.style.left = Math.round(overlayRect.left - imageRect.left) + "px";
+      overlayClone.style.top = Math.round(overlayRect.top - imageRect.top) + "px";
+      overlayClone.style.width = Math.ceil(overlayRect.width) + "px";
+      overlayClone.style.height = Math.ceil(overlayRect.height) + "px";
+      overlayClone.style.margin = "0";
+      overlayClone.style.transform = overlayStyle.transform;
+      overlayClone.style.transformOrigin = overlayStyle.transformOrigin;
+      exportStage.appendChild(overlayClone);
+    }
+
+    // Clone the complete draggable overlay, preserving its internal layout.
+    const textClone = mydiv.cloneNode(true);
+    textClone.style.position = "absolute";
+    textClone.style.left = Math.round(mydivRect.left - imageRect.left) + "px";
+    textClone.style.top = Math.round(mydivRect.top - imageRect.top) + "px";
+    textClone.style.width = Math.ceil(mydivRect.width) + "px";
+    textClone.style.height = exportHeight + "px";
+    textClone.style.margin = "0";
+    textClone.style.background = "transparent";
+    textClone.style.zIndex = "10";
+    textClone.style.pointerEvents = "none";
+
+    // The cloned content should not retain the editor's cursor/selection.
+    textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
+      el.removeAttribute("contenteditable");
     });
 
-    const imageRect = image.getBoundingClientRect();
-    const bottomHrRect = bottomHr.getBoundingClientRect();
-    const mainTextRect = document.getElementById("maintext").getBoundingClientRect();
-    const bottomTextRect = document.getElementById("bottomtext").getBoundingClientRect();
+    exportStage.appendChild(textClone);
 
-    // The image and the draggable text now share the same left edge.
-    const exportLeft = imageRect.left;
-    const exportTop = imageRect.top;
+    // Wait for every image/font inside the isolated stage before capturing it.
+    const stageImages = Array.from(exportStage.querySelectorAll("img"));
+    await Promise.all(stageImages.map(function (img) {
+      if (img.complete && img.naturalWidth > 0) {
+        return Promise.resolve();
+      }
 
-    /*
-     * Keep the source image at its original 432x540 size. The exported canvas
-     * grows DOWNWARD when the headline wraps or the bottom divider/text extends
-     * below the image.
-     */
-    const exportBottom = Math.max(
-      imageRect.bottom,
-      bottomHrRect.bottom,
-      mainTextRect.bottom,
-      bottomTextRect.bottom
-    );
+      return new Promise(function (resolve, reject) {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", function () {
+          reject(new Error("An export image could not be loaded."));
+        }, { once: true });
+      });
+    }));
 
-    const exportWidth = Math.ceil(imageRect.width);
-    const exportHeight = Math.ceil(exportBottom - exportTop + 8);
+    await new Promise(function (resolve) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(resolve);
+      });
+    });
 
-    /*
-     * The text can extend below the browser viewport because #mydiv is
-     * absolutely positioned. Give html2canvas a virtual viewport tall enough
-     * to render that overflow instead of clipping the export at the viewport.
-     */
-    const requiredWindowHeight = Math.max(
-      window.innerHeight,
-      Math.ceil(exportBottom + window.scrollY + 100)
-    );
-
-    const canvas = await html2canvas(document.body, {
-      x: Math.round(exportLeft + window.scrollX),
-      y: Math.round(exportTop + window.scrollY),
+    const canvas = await html2canvas(exportStage, {
       width: exportWidth,
       height: exportHeight,
-      windowWidth: Math.max(window.innerWidth, Math.ceil(exportLeft + exportWidth + window.scrollX + 20)),
-      windowHeight: requiredWindowHeight,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
+      windowWidth: exportWidth,
+      windowHeight: exportHeight,
+      scrollX: 0,
+      scrollY: 0,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
-      logging: false,
-      ignoreElements: function (el) {
-        return el.id === "save-image";
-      }
+      logging: false
     });
 
     const blob = await new Promise(function (resolve, reject) {
@@ -250,6 +324,7 @@ document.getElementById("save-image").addEventListener("click", async function (
       document.body.appendChild(link);
       link.click();
       link.remove();
+
       setTimeout(function () {
         URL.revokeObjectURL(link.href);
       }, 1000);
@@ -260,8 +335,8 @@ document.getElementById("save-image").addEventListener("click", async function (
       alert("Could not save the image. Please try again.");
     }
   } finally {
-    if (typeof originalImageTransform !== "undefined") {
-      image.style.transform = originalImageTransform;
+    if (exportStage && exportStage.parentNode) {
+      exportStage.parentNode.removeChild(exportStage);
     }
 
     button.disabled = false;
