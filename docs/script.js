@@ -165,7 +165,7 @@ document.getElementById("save-image").addEventListener("click", async function (
     }
 
     const background = getComputedStyle(image).backgroundImage;
-    const match = background.match(/^url\\(["']?(.*?)["']?\\)$/);
+    const match = background.match(/^url\(["']?(.*?)["']?\)$/);
 
     if (!match) {
       throw new Error("No uploaded image is available to export.");
