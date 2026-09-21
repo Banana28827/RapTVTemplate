@@ -126,41 +126,8 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.textContent = "Saving...";
 
   try {
-    /*
-     * Build a temporary 432x540 export canvas that mirrors exactly what the
-     * user sees: the selected image + overlay, with the draggable text
-     * elements placed at their current screen position relative to the image.
-     *
-     * This is more reliable than cropping document.body because #mydiv has
-     * height: 0 and is positioned outside #display-image in the DOM.
-     */
     const imageRect = image.getBoundingClientRect();
-    const exportWidth = Math.round(imageRect.width);
-    const exportHeight = Math.round(imageRect.height);
 
-    const exportBox = document.createElement("div");
-    exportBox.style.position = "fixed";
-    exportBox.style.left = "0";
-    exportBox.style.top = "0";
-    exportBox.style.width = exportWidth + "px";
-    exportBox.style.height = exportHeight + "px";
-    exportBox.style.overflow = "hidden";
-    exportBox.style.backgroundColor = "#000000";
-    exportBox.dataset.raptvExport = "true";
-    exportBox.style.zIndex = "-99999";
-
-    // Copy the actual image/overlay element.
-    const imageClone = image.cloneNode(true);
-    imageClone.style.position = "absolute";
-    imageClone.style.left = "0";
-    imageClone.style.top = "0";
-    imageClone.style.margin = "0";
-    imageClone.style.width = exportWidth + "px";
-    imageClone.style.height = exportHeight + "px";
-    imageClone.style.border = "1px solid black";
-    exportBox.appendChild(imageClone);
-
-    // Copy each visible draggable element using its current screen position.
     const textElements = [
       document.getElementById("mydivheader"),
       document.getElementById("maintext"),
@@ -168,26 +135,97 @@ document.getElementById("save-image").addEventListener("click", async function (
       document.getElementById("bottomhr")
     ].filter(Boolean);
 
+    // Make sure the custom Steelfishy font has finished loading before
+    // html2canvas clones the text.
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+
+    // The post normally starts at the selected image. Extend the export only
+    // when a draggable element (especially bottomhr) reaches below it.
+    const rects = textElements.map(function (el) {
+      const r = el.getBoundingClientRect();
+      return {
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom
+      };
+    });
+
+    const exportLeft = Math.min(
+      imageRect.left,
+      ...rects.map(r => r.left)
+    );
+    const exportTop = imageRect.top;
+    const exportRight = Math.max(
+      imageRect.right,
+      ...rects.map(r => r.right)
+    );
+    const exportBottom = Math.max(
+      imageRect.bottom,
+      ...rects.map(r => r.bottom)
+    );
+
+    const exportWidth = Math.ceil(exportRight - exportLeft);
+    const exportHeight = Math.ceil(exportBottom - exportTop);
+
+    const exportBox = document.createElement("div");
+    exportBox.dataset.raptvExport = "true";
+    exportBox.style.position = "fixed";
+    exportBox.style.left = "0";
+    exportBox.style.top = "0";
+    exportBox.style.width = exportWidth + "px";
+    exportBox.style.height = exportHeight + "px";
+    exportBox.style.overflow = "hidden";
+    exportBox.style.backgroundColor = "#000000";
+    exportBox.style.zIndex = "-99999";
+
+    // Copy the selected image and overlay.
+    const imageClone = image.cloneNode(true);
+    imageClone.style.position = "absolute";
+    imageClone.style.left = Math.round(imageRect.left - exportLeft) + "px";
+    imageClone.style.top = "0";
+    imageClone.style.margin = "0";
+    imageClone.style.width = Math.round(imageRect.width) + "px";
+    imageClone.style.height = Math.round(imageRect.height) + "px";
+    imageClone.style.border = "1px solid black";
+    exportBox.appendChild(imageClone);
+
     textElements.forEach(function (source) {
       const rect = source.getBoundingClientRect();
       const clone = source.cloneNode(true);
+      const computed = window.getComputedStyle(source);
 
       clone.style.position = "absolute";
-      clone.style.left = Math.round(rect.left - imageRect.left) + "px";
-      clone.style.top = Math.round(rect.top - imageRect.top) + "px";
+      clone.style.left = Math.round(rect.left - exportLeft) + "px";
+      clone.style.top = Math.round(rect.top - exportTop) + "px";
       clone.style.margin = "0";
-
-      // Keep the elements visible even though the temporary container is
-      // outside the normal document flow.
       clone.style.visibility = "visible";
       clone.style.opacity = "1";
+
+      // html2canvas can otherwise fall back to a default font for cloned
+      // content. Copy the resolved font properties explicitly.
+      clone.style.fontFamily = computed.fontFamily;
+      clone.style.fontSize = computed.fontSize;
+      clone.style.fontStyle = computed.fontStyle;
+      clone.style.fontWeight = computed.fontWeight;
+      clone.style.lineHeight = computed.lineHeight;
+      clone.style.letterSpacing = computed.letterSpacing;
+      clone.style.textTransform = computed.textTransform;
+      clone.style.color = computed.color;
+
+      // Preserve the NEWS image's intrinsic dimensions and bottomhr width.
+      if (source.id === "bottomhr") {
+        clone.style.width = computed.width;
+        clone.style.height = computed.height;
+      }
 
       exportBox.appendChild(clone);
     });
 
     document.body.appendChild(exportBox);
 
-    // Give the browser a frame to resolve fonts/images before rendering.
     await new Promise(function (resolve) {
       requestAnimationFrame(function () {
         requestAnimationFrame(resolve);
@@ -217,7 +255,6 @@ document.getElementById("save-image").addEventListener("click", async function (
 
     const file = new File([blob], "raptv-post.png", { type: "image/png" });
 
-    // Use the browser's native save dialog when supported.
     if ("showSaveFilePicker" in window) {
       const handle = await window.showSaveFilePicker({
         suggestedName: "raptv-post.png",
@@ -231,14 +268,12 @@ document.getElementById("save-image").addEventListener("click", async function (
       await writable.write(blob);
       await writable.close();
     } else if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-      // On mobile browsers, use the native Android/iOS share sheet.
       await navigator.share({
         files: [file],
         title: "RAP TV Post",
         text: "Save your generated RAP TV post"
       });
     } else {
-      // Final fallback for browsers without a native save dialog/share sheet.
       const link = document.createElement("a");
       link.download = "raptv-post.png";
       link.href = URL.createObjectURL(blob);
@@ -250,8 +285,7 @@ document.getElementById("save-image").addEventListener("click", async function (
       }, 1000);
     }
   } catch (error) {
-    // Remove the temporary export element if rendering failed.
-    const leftover = document.querySelector("body > div[data-raptv-export]");
+    const leftover = document.querySelector("body > div[data-raptv-export='true']");
     if (leftover) {
       leftover.remove();
     }
