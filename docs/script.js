@@ -116,7 +116,6 @@ $("#slider").on("input",function () {
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
   const image = document.getElementById("display-image");
-  const textBox = document.getElementById("mydiv");
 
   if (typeof html2canvas === "undefined") {
     alert("The image exporter could not be loaded. Please refresh the page and try again.");
@@ -127,53 +126,80 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.textContent = "Saving...";
 
   try {
-    // Capture the image and the draggable text box together, wherever the user
-    // has positioned the text box on the page.
-    const elements = [image, textBox];
+    // The draggable text container itself has height: 0, so use its visible
+    // children when calculating the actual area that needs to be exported.
+    const elements = [
+      image,
+      document.getElementById("mydivheader"),
+      document.getElementById("maintext"),
+      document.getElementById("bottomtext"),
+      document.getElementById("bottomhr")
+    ].filter(Boolean);
+
     const rects = elements.map(function (el) {
       const r = el.getBoundingClientRect();
       return {
-        left: r.left,
-        top: r.top,
-        right: r.right,
-        bottom: r.bottom
+        left: r.left + window.scrollX,
+        top: r.top + window.scrollY,
+        right: r.right + window.scrollX,
+        bottom: r.bottom + window.scrollY
       };
     });
 
-    const left = Math.min.apply(null, rects.map(r => r.left));
-    const top = Math.min.apply(null, rects.map(r => r.top));
-    const right = Math.max.apply(null, rects.map(r => r.right));
-    const bottom = Math.max.apply(null, rects.map(r => r.bottom));
+    const padding = 6;
+    const left = Math.max(0, Math.floor(Math.min.apply(null, rects.map(r => r.left)) - padding));
+    const top = Math.max(0, Math.floor(Math.min.apply(null, rects.map(r => r.top)) - padding));
+    const right = Math.ceil(Math.max.apply(null, rects.map(r => r.right)) + padding);
+    const bottom = Math.ceil(Math.max.apply(null, rects.map(r => r.bottom)) + padding);
 
-    const padding = 4;
-    const x = Math.max(0, left - padding);
-    const y = Math.max(0, top - padding);
-    const width = Math.min(window.innerWidth - x, right - left + padding * 2);
-    const height = Math.min(window.innerHeight - y, bottom - top + padding * 2);
+    const pageWidth = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+    const pageHeight = Math.max(document.documentElement.scrollHeight, window.innerHeight);
 
-    const canvas = await html2canvas(document.body, {
-      x: x,
-      y: y,
-      width: width,
-      height: height,
+    // Render the whole document first. This avoids html2canvas interpreting
+    // x/y relative to the wrong viewport when the page is scrolled.
+    const fullCanvas = await html2canvas(document.body, {
+      x: 0,
+      y: 0,
+      width: pageWidth,
+      height: pageHeight,
       scale: 2,
       backgroundColor: "#000000",
       useCORS: true,
       logging: false,
+      windowWidth: pageWidth,
+      windowHeight: pageHeight,
+      scrollX: 0,
+      scrollY: 0,
       ignoreElements: function (el) {
         return el.id === "save-image";
       }
     });
 
+    const scale = fullCanvas.width / pageWidth;
+    const cropX = Math.max(0, Math.round(left * scale));
+    const cropY = Math.max(0, Math.round(top * scale));
+    const cropWidth = Math.min(fullCanvas.width - cropX, Math.round((right - left) * scale));
+    const cropHeight = Math.min(fullCanvas.height - cropY, Math.round((bottom - top) * scale));
+
+    const outputCanvas = document.createElement("canvas");
+    outputCanvas.width = cropWidth;
+    outputCanvas.height = cropHeight;
+
+    const ctx = outputCanvas.getContext("2d");
+    ctx.drawImage(
+      fullCanvas,
+      cropX, cropY, cropWidth, cropHeight,
+      0, 0, cropWidth, cropHeight
+    );
+
     const blob = await new Promise(function (resolve, reject) {
-      canvas.toBlob(function (result) {
+      outputCanvas.toBlob(function (result) {
         if (result) {
           resolve(result);
         } else {
           reject(new Error("Could not create the PNG file."));
         }
       }, "image/png");
-
     });
 
     const file = new File([blob], "raptv-post.png", { type: "image/png" });
@@ -191,8 +217,8 @@ document.getElementById("save-image").addEventListener("click", async function (
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
-    // On mobile browsers that support Web Share, open the native share/save sheet.
     } else if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      // On mobile browsers, use the native Android/iOS share sheet.
       await navigator.share({
         files: [file],
         title: "RAP TV Post",
