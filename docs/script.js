@@ -141,119 +141,102 @@ document.getElementById("save-image").addEventListener("click", async function (
     });
 
     /*
-     * Do not capture document.body here. #display-image is a CSS background,
-     * while the draggable text is a separate absolutely-positioned element.
-     * html2canvas can render that combination with the background displaced
-     * when the body is cropped.
+     * Export a post-sized composition instead of cropping document.body.
+     * The editor keeps the upload and draggable overlay in different layout
+     * containers, so their page coordinates must not be used as the PNG's
+     * coordinates.
      *
-     * Instead, build a small, self-contained export stage:
-     *   - a real <img> for the uploaded background
-     *   - the existing text/NEWS/divider overlay cloned at its exact screen
-     *     position relative to the image
-     *   - the existing overlay.png cloned over the image
-     *
-     * This makes the exported coordinates independent of Bootstrap columns,
-     * the page viewport, scrolling, and html2canvas body cropping.
+     * The uploaded image is always the 432x540 base of the export.
+     * The complete draggable overlay is placed over that base at the
+     * bottom-left, which is the intended RAP TV composition.
      */
-    const imageRect = image.getBoundingClientRect();
-    const mydivRect = mydiv.getBoundingClientRect();
-    const bottomHr = document.getElementById("bottomhr");
-    const mainText = document.getElementById("maintext");
-    const bottomText = document.getElementById("bottomtext");
+    const exportWidth = 432;
+    const imageHeight = 540;
 
-    const rects = [
-      mydivRect,
-      bottomHr.getBoundingClientRect(),
-      mainText.getBoundingClientRect(),
-      bottomText.getBoundingClientRect()
-    ];
+    const computedBackground = getComputedStyle(image).backgroundImage;
+    const match = computedBackground.match(/^url\(["']?(.*?)["']?\)$/);
 
-    const relativeBottom = Math.max.apply(null, rects.map(function (rect) {
-      return rect.bottom - imageRect.top;
-    }));
+    if (!match) {
+      throw new Error("No uploaded image is available to export.");
+    }
 
-    const exportWidth = Math.max(1, Math.ceil(imageRect.width));
-    const exportHeight = Math.max(
-      Math.ceil(imageRect.height),
-      Math.ceil(relativeBottom + 8)
-    );
+    const uploadedUrl = match[1];
 
     exportStage = document.createElement("div");
     exportStage.id = "raptv-export-stage";
-    exportStage.style.position = "absolute";
-    exportStage.style.left = "0px";
-    exportStage.style.top = "0px";
+    exportStage.style.position = "fixed";
+    exportStage.style.left = "-100000px";
+    exportStage.style.top = "0";
     exportStage.style.width = exportWidth + "px";
-    exportStage.style.height = exportHeight + "px";
+    exportStage.style.height = imageHeight + "px";
     exportStage.style.overflow = "hidden";
-    exportStage.style.background = "#000";
+    exportStage.style.background = "#000000";
     exportStage.style.pointerEvents = "none";
     exportStage.style.zIndex = "-100000";
     document.body.appendChild(exportStage);
 
-    // Recreate the uploaded CSS background as a real image so it cannot be
-    // lost or shifted when html2canvas renders the export.
-    const backgroundImage = document.createElement("img");
-    const backgroundUrl = getComputedStyle(image).backgroundImage;
+    const exportImage = document.createElement("img");
+    exportImage.src = uploadedUrl;
+    exportImage.alt = "";
+    exportImage.style.position = "absolute";
+    exportImage.style.left = "0";
+    exportImage.style.top = "0";
+    exportImage.style.width = exportWidth + "px";
+    exportImage.style.height = imageHeight + "px";
+    exportImage.style.objectFit = "cover";
+    exportImage.style.objectPosition = "center center";
+    exportImage.style.display = "block";
+    exportStage.appendChild(exportImage);
 
-    if (!backgroundUrl || backgroundUrl === "none") {
-      throw new Error("No uploaded image is available to export.");
-    }
-
-    const urlMatch = backgroundUrl.match(/^url\(["']?(.*?)["']?\)$/);
-    if (!urlMatch) {
-      throw new Error("Could not read the uploaded image.");
-    }
-
-    backgroundImage.src = urlMatch[1];
-    backgroundImage.style.position = "absolute";
-    backgroundImage.style.left = "0px";
-    backgroundImage.style.top = "0px";
-    backgroundImage.style.width = exportWidth + "px";
-    backgroundImage.style.height = Math.ceil(imageRect.height) + "px";
-    backgroundImage.style.objectFit = "cover";
-    backgroundImage.style.objectPosition = "center center";
-    backgroundImage.style.display = "block";
-    exportStage.appendChild(backgroundImage);
-
-    // Clone the existing overlay graphic from inside #display-image.
     const originalOverlay = image.querySelector("img");
     if (originalOverlay) {
       const overlayClone = originalOverlay.cloneNode(true);
-      const overlayRect = originalOverlay.getBoundingClientRect();
       const overlayStyle = getComputedStyle(originalOverlay);
 
       overlayClone.style.position = "absolute";
-      overlayClone.style.left = Math.round(overlayRect.left - imageRect.left) + "px";
-      overlayClone.style.top = Math.round(overlayRect.top - imageRect.top) + "px";
-      overlayClone.style.width = Math.ceil(overlayRect.width) + "px";
-      overlayClone.style.height = Math.ceil(overlayRect.height) + "px";
+      overlayClone.style.left = "0";
+      overlayClone.style.top = "0";
+      overlayClone.style.width = exportWidth + "px";
+      overlayClone.style.height = "auto";
       overlayClone.style.margin = "0";
       overlayClone.style.transform = overlayStyle.transform;
       overlayClone.style.transformOrigin = overlayStyle.transformOrigin;
       exportStage.appendChild(overlayClone);
     }
 
-    // Clone the complete draggable overlay, preserving its internal layout.
+    /*
+     * Measure the visible overlay independently. #mydiv itself has height:0
+     * in the editor, so use its children to determine the actual content
+     * footprint before positioning the clone.
+     */
+    const mydivRect = mydiv.getBoundingClientRect();
+    const headerRect = document.getElementById("mydivheader").getBoundingClientRect();
+    const mainRect = document.getElementById("maintext").getBoundingClientRect();
+    const bottomRect = document.getElementById("bottomtext").getBoundingClientRect();
+    const hrRect = document.getElementById("bottomhr").getBoundingClientRect();
+
+    const overlayTop = Math.min(headerRect.top, mainRect.top, bottomRect.top, hrRect.top);
+    const overlayBottom = Math.max(headerRect.bottom, mainRect.bottom, bottomRect.bottom, hrRect.bottom);
+    const overlayHeight = Math.max(1, Math.ceil(overlayBottom - overlayTop + 8));
+
     const textClone = mydiv.cloneNode(true);
     textClone.style.position = "absolute";
-    textClone.style.left = Math.round(mydivRect.left - imageRect.left) + "px";
-    textClone.style.top = Math.round(mydivRect.top - imageRect.top) + "px";
-    textClone.style.width = Math.ceil(mydivRect.width) + "px";
-    textClone.style.height = exportHeight + "px";
+    textClone.style.left = "0";
+    textClone.style.top = Math.max(0, imageHeight - overlayHeight) + "px";
+    textClone.style.width = exportWidth + "px";
+    textClone.style.height = overlayHeight + "px";
     textClone.style.margin = "0";
+    textClone.style.padding = "0";
     textClone.style.background = "transparent";
     textClone.style.zIndex = "10";
     textClone.style.pointerEvents = "none";
 
-    // The cloned content should not retain the editor's cursor/selection.
     textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
       el.removeAttribute("contenteditable");
     });
 
     exportStage.appendChild(textClone);
 
-    // Wait for every image/font inside the isolated stage before capturing it.
     const stageImages = Array.from(exportStage.querySelectorAll("img"));
     await Promise.all(stageImages.map(function (img) {
       if (img.complete && img.naturalWidth > 0) {
@@ -276,9 +259,9 @@ document.getElementById("save-image").addEventListener("click", async function (
 
     const canvas = await html2canvas(exportStage, {
       width: exportWidth,
-      height: exportHeight,
+      height: imageHeight,
       windowWidth: exportWidth,
-      windowHeight: exportHeight,
+      windowHeight: imageHeight,
       scrollX: 0,
       scrollY: 0,
       scale: 2,
@@ -289,11 +272,8 @@ document.getElementById("save-image").addEventListener("click", async function (
 
     const blob = await new Promise(function (resolve, reject) {
       canvas.toBlob(function (result) {
-        if (result) {
-          resolve(result);
-        } else {
-          reject(new Error("Could not create the PNG file."));
-        }
+        if (result) resolve(result);
+        else reject(new Error("Could not create the PNG file."));
       }, "image/png");
     });
 
@@ -324,7 +304,6 @@ document.getElementById("save-image").addEventListener("click", async function (
       document.body.appendChild(link);
       link.click();
       link.remove();
-
       setTimeout(function () {
         URL.revokeObjectURL(link.href);
       }, 1000);
@@ -338,7 +317,6 @@ document.getElementById("save-image").addEventListener("click", async function (
     if (exportStage && exportStage.parentNode) {
       exportStage.parentNode.removeChild(exportStage);
     }
-
     button.disabled = false;
     button.textContent = "Save Image";
   }
