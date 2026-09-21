@@ -117,6 +117,10 @@ document.getElementById("save-image").addEventListener("click", async function (
   const button = this;
   const image = document.getElementById("display-image");
   const mydiv = document.getElementById("mydiv");
+  const header = document.getElementById("mydivheader");
+  const mainText = document.getElementById("maintext");
+  const bottomText = document.getElementById("bottomtext");
+  const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
     alert("The image exporter could not be loaded. Please refresh the page and try again.");
@@ -125,7 +129,6 @@ document.getElementById("save-image").addEventListener("click", async function (
 
   button.disabled = true;
   button.textContent = "Saving...";
-
   let stage = null;
 
   try {
@@ -140,100 +143,100 @@ document.getElementById("save-image").addEventListener("click", async function (
       });
     });
 
-    /*
-     * Export exactly what the editor shows:
-     *
-     * - The export frame is the actual 432x540 #display-image.
-     * - A clone of #display-image keeps its background image and the
-     *   dark bottom fade (#overlay-img) together.
-     * - A clone of #mydiv is placed using its CURRENT screen coordinates
-     *   relative to the image.
-     *
-     * Nothing in the live editor is moved, so the user can still drag the
-     * entire text box normally.
-     */
+    // Export an isolated composition. The editor itself is never moved.
+    // This avoids the body-crop/transform problem that left the image on
+    // the right side of the saved PNG.
     const imageRect = image.getBoundingClientRect();
-    const mydivRect = mydiv.getBoundingClientRect();
+    const imageWidth = Math.round(imageRect.width);
+    const imageHeight = Math.round(imageRect.height);
 
-    const width = Math.round(imageRect.width);
-    const height = Math.round(imageRect.height);
-
-    if (!width || !height) {
+    if (!imageWidth || !imageHeight) {
       throw new Error("The image area is not available.");
     }
 
+    const elements = [header, mainText, bottomText, bottomHr];
+    const rects = elements.map(function (el) {
+      return el.getBoundingClientRect();
+    });
+
+    const contentBottom = Math.max.apply(null, [
+      imageRect.bottom
+    ].concat(rects.map(function (r) { return r.bottom; })));
+
+    const exportHeight = Math.max(
+      imageHeight,
+      Math.ceil(contentBottom - imageRect.top + 8)
+    );
+
     stage = document.createElement("div");
     stage.style.position = "fixed";
-    stage.style.left = "0px";
-    stage.style.top = "0px";
-    stage.style.width = width + "px";
-    stage.style.height = height + "px";
+    stage.style.left = "0";
+    stage.style.top = "0";
+    stage.style.width = imageWidth + "px";
+    stage.style.height = exportHeight + "px";
     stage.style.overflow = "hidden";
     stage.style.background = "#000";
-    stage.style.margin = "0";
-    stage.style.padding = "0";
-    stage.style.border = "0";
     stage.style.pointerEvents = "none";
     stage.style.zIndex = "2147483647";
-
     document.body.appendChild(stage);
 
-    // Clone the complete image container. This preserves its CSS background,
-    // background-size/position, and the dark fade overlay inside it.
+    // Clone the complete image container so its uploaded background and
+    // bottom fade/overlay stay together.
     const imageClone = image.cloneNode(true);
     imageClone.removeAttribute("id");
     imageClone.style.position = "absolute";
     imageClone.style.left = "0px";
     imageClone.style.top = "0px";
-    imageClone.style.width = width + "px";
-    imageClone.style.height = height + "px";
+    imageClone.style.width = imageWidth + "px";
+    imageClone.style.height = imageHeight + "px";
     imageClone.style.margin = "0";
     imageClone.style.border = "0";
     imageClone.style.transform = "none";
-    imageClone.style.boxSizing = "border-box";
-    imageClone.style.backgroundSize = getComputedStyle(image).backgroundSize;
     imageClone.style.backgroundPosition = getComputedStyle(image).backgroundPosition;
+    imageClone.style.backgroundSize = getComputedStyle(image).backgroundSize;
     imageClone.style.backgroundRepeat = getComputedStyle(image).backgroundRepeat;
-    imageClone.style.overflow = "hidden";
-
     stage.appendChild(imageClone);
 
-    /*
-     * Clone the WHOLE draggable box rather than rebuilding its children.
-     * That preserves the exact relationship between NEWS, headline,
-     * subheadline, and divider that the user sees on screen.
-     */
-    const textClone = mydiv.cloneNode(true);
-    textClone.removeAttribute("id");
-    textClone.style.position = "absolute";
-    textClone.style.left = Math.round(mydivRect.left - imageRect.left) + "px";
-    textClone.style.top = Math.round(mydivRect.top - imageRect.top) + "px";
-    textClone.style.width = getComputedStyle(mydiv).width;
-    textClone.style.height = getComputedStyle(mydiv).height;
-    textClone.style.margin = "0";
-    textClone.style.padding = getComputedStyle(mydiv).padding;
-    textClone.style.border = "0";
-    textClone.style.background = "transparent";
-    textClone.style.zIndex = "20";
-    textClone.style.pointerEvents = "none";
+    // Copy each draggable element at its current screen position relative
+    // to the artwork. Dragging #mydiv therefore remains fully supported.
+    elements.forEach(function (source) {
+      const sourceRect = source.getBoundingClientRect();
+      const clone = source.cloneNode(true);
+      const computed = getComputedStyle(source);
 
-    textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
-      el.removeAttribute("contenteditable");
+      clone.removeAttribute("id");
+      clone.style.position = "absolute";
+      clone.style.left = Math.round(sourceRect.left - imageRect.left) + "px";
+      clone.style.top = Math.round(sourceRect.top - imageRect.top) + "px";
+      clone.style.width = Math.round(sourceRect.width) + "px";
+      clone.style.height = Math.round(sourceRect.height) + "px";
+      clone.style.margin = "0";
+      clone.style.boxSizing = "border-box";
+      clone.style.transform = computed.transform;
+      clone.style.transformOrigin = computed.transformOrigin;
+      clone.style.zIndex = "10";
+      clone.style.pointerEvents = "none";
+
+      clone.querySelectorAll("[contenteditable]").forEach(function (el) {
+        el.removeAttribute("contenteditable");
+      });
+
+      stage.appendChild(clone);
     });
-
-    stage.appendChild(textClone);
 
     await new Promise(function (resolve) {
       requestAnimationFrame(function () {
-        requestAnimationFrame(resolve);
+        requestAnimationFrame(function () {
+          resolve();
+        });
       });
     });
 
     const canvas = await html2canvas(stage, {
-      width: width,
-      height: height,
-      windowWidth: width,
-      windowHeight: height,
+      width: imageWidth,
+      height: exportHeight,
+      windowWidth: Math.max(window.innerWidth, imageWidth),
+      windowHeight: Math.max(window.innerHeight, exportHeight),
       scrollX: 0,
       scrollY: 0,
       scale: 2,
@@ -244,17 +247,13 @@ document.getElementById("save-image").addEventListener("click", async function (
 
     const blob = await new Promise(function (resolve, reject) {
       canvas.toBlob(function (result) {
-        if (result) {
-          resolve(result);
-        } else {
-          reject(new Error("Could not create the PNG file."));
-        }
+        if (result) resolve(result);
+        else reject(new Error("Could not create the PNG file."));
       }, "image/png");
     });
 
     const link = document.createElement("a");
     const objectUrl = URL.createObjectURL(blob);
-
     link.download = "raptv-post.png";
     link.href = objectUrl;
     link.style.display = "none";
@@ -274,7 +273,6 @@ document.getElementById("save-image").addEventListener("click", async function (
     if (stage && stage.parentNode) {
       stage.parentNode.removeChild(stage);
     }
-
     button.disabled = false;
     button.textContent = "Save Image";
   }
