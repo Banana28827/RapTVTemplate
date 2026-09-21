@@ -242,57 +242,48 @@ document.getElementById("save-image").addEventListener("click", async function (
     }
 
     /*
-     * Render only the draggable text box with html2canvas.
-     * Its position is calculated from the user's CURRENT dragged position,
-     * so the editor's drag behavior is untouched.
+     * Render each visible part of the draggable box directly from the live
+     * DOM. Capturing the whole #mydiv fails because #mydiv itself has a
+     * zero-height CSS box; html2canvas therefore only sees the divider.
+     *
+     * Each element is captured at its real on-screen size and then placed
+     * at its real position relative to the artwork.
      */
-    textStage = document.createElement("div");
-    textStage.style.position = "fixed";
-    textStage.style.left = "0px";
-    textStage.style.top = "0px";
-    textStage.style.width = width + "px";
-    textStage.style.height = height + "px";
-    textStage.style.overflow = "hidden";
-    textStage.style.background = "transparent";
-    textStage.style.pointerEvents = "none";
-    textStage.style.zIndex = "2147483647";
-    document.body.appendChild(textStage);
+    const imageLeft = imageRect.left;
+    const imageTop = imageRect.top;
 
-    const textClone = mydiv.cloneNode(true);
-    textClone.removeAttribute("id");
-    textClone.style.position = "absolute";
-    textClone.style.left = Math.round(mydivRect.left - imageRect.left) + "px";
-    textClone.style.top = Math.round(mydivRect.top - imageRect.top) + "px";
-    textClone.style.margin = "0";
-    textClone.style.zIndex = "10";
-    textClone.style.pointerEvents = "none";
+    const textElements = [
+      document.getElementById("mydivheader"),
+      document.getElementById("maintext"),
+      document.getElementById("bottomtext"),
+      document.getElementById("bottomhr")
+    ];
 
-    textClone.querySelectorAll("[contenteditable]").forEach(function (el) {
-      el.removeAttribute("contenteditable");
-    });
+    for (const source of textElements) {
+      if (!source) continue;
 
-    textStage.appendChild(textClone);
+      const rect = source.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
 
-    await new Promise(function (resolve) {
-      requestAnimationFrame(function () {
-        requestAnimationFrame(resolve);
+      const elementCanvas = await html2canvas(source, {
+        width: Math.ceil(rect.width),
+        height: Math.ceil(rect.height),
+        windowWidth: Math.max(window.innerWidth, Math.ceil(rect.right)),
+        windowHeight: Math.max(window.innerHeight, Math.ceil(rect.bottom)),
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        scale: 2,
+        backgroundColor: null,
+        useCORS: true,
+        logging: false
       });
-    });
 
-    const textCanvas = await html2canvas(textStage, {
-      width: width,
-      height: height,
-      windowWidth: width,
-      windowHeight: height,
-      scrollX: 0,
-      scrollY: 0,
-      scale: 2,
-      backgroundColor: null,
-      useCORS: true,
-      logging: false
-    });
-
-    ctx.drawImage(textCanvas, 0, 0);
+      ctx.drawImage(
+        elementCanvas,
+        Math.round((rect.left - imageLeft) * 2),
+        Math.round((rect.top - imageTop) * 2)
+      );
+    }
 
     const blob = await new Promise(function (resolve, reject) {
       canvas.toBlob(function (result) {
