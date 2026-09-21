@@ -116,6 +116,7 @@ $("#slider").on("input",function () {
 document.getElementById("save-image").addEventListener("click", async function () {
   const button = this;
   const image = document.getElementById("display-image");
+  const textContainer = document.getElementById("ct");
   const bottomHr = document.getElementById("bottomhr");
 
   if (typeof html2canvas === "undefined") {
@@ -127,28 +128,41 @@ document.getElementById("save-image").addEventListener("click", async function (
   button.textContent = "Saving...";
 
   try {
-    /*
-     * Capture the LIVE page instead of rebuilding/cloning the text.
-     *
-     * This is important because the live page already has the correct
-     * Steelfishy font for #maintext and the slimmer Arial italic font for
-     * #bottomtext. Cloning the elements caused html2canvas to change their
-     * font/layout.
-     */
+    // Make sure the live page is fully laid out before measuring it.
     if (document.fonts) {
       await document.fonts.load('50px "Steelfishy"');
       await document.fonts.ready;
     }
 
-    const imageRect = image.getBoundingClientRect();
-    const bottomHrRect = bottomHr ? bottomHr.getBoundingClientRect() : imageRect;
+    await new Promise(function (resolve) {
+      requestAnimationFrame(resolve);
+    });
 
-    // Keep the post 432px wide, but extend its height until bottomhr.png ends.
-    // If the headline becomes two or three lines, bottomhr moves down and the
-    // exported image automatically grows with it.
+    const imageRect = image.getBoundingClientRect();
+    const textRect = textContainer.getBoundingClientRect();
+    const bottomHrRect = bottomHr.getBoundingClientRect();
+
     const exportWidth = Math.round(imageRect.width);
-    const exportBottom = Math.max(imageRect.bottom, bottomHrRect.bottom);
-    const exportHeight = Math.ceil(exportBottom - imageRect.top);
+
+    /*
+     * #ct has a fixed CSS height of 150px, but its contents are allowed to
+     * overflow. scrollHeight includes that overflow, so it tells us how far
+     * the actual content extends when the headline becomes multiple lines.
+     *
+     * Use both scrollHeight and bottomhr's real position. This prevents the
+     * export from falling back to the image's fixed 540px height.
+     */
+    const contentBottomFromCt = textRect.top + textContainer.scrollHeight;
+    const exportBottom = Math.max(
+      imageRect.bottom,
+      bottomHrRect.bottom,
+      contentBottomFromCt
+    );
+
+    // A tiny amount of breathing room prevents the bottomhr pixels touching
+    // the final edge of the PNG.
+    const bottomPadding = 2;
+    const exportHeight = Math.ceil(exportBottom - imageRect.top + bottomPadding);
 
     const canvas = await html2canvas(document.body, {
       x: Math.round(imageRect.left + window.scrollX),
@@ -159,6 +173,11 @@ document.getElementById("save-image").addEventListener("click", async function (
       backgroundColor: "#000000",
       useCORS: true,
       logging: false,
+      windowWidth: document.documentElement.scrollWidth,
+      windowHeight: Math.max(
+        document.documentElement.scrollHeight,
+        Math.ceil(exportBottom + window.scrollY + bottomPadding)
+      ),
       ignoreElements: function (el) {
         return el.id === "save-image";
       }
